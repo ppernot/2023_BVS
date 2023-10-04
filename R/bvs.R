@@ -1,4 +1,3 @@
-setwd("~/Bureau/2023_BVS/R")
 
 figDir = '../Figs'
 tabDir = '../Tabs'
@@ -125,7 +124,7 @@ globScore <- function(E, uE, nBin, intrv, io0, io1, io2) {
   cons  = scoreFun0(Z[io0], nBin, intrv)
   adap1 = scoreFun0(Z[io1], nBin, intrv)
   adap2 = scoreFun0(Z[io2], nBin, intrv)
-  li    = scoreFun1(E[io0],uE[io0],nBin, intrv)
+  li    = scoreFun1(E[io0],uE[io0], nBin, intrv)
   ence  = li$ence
   uce   = li$uce
   return(
@@ -233,7 +232,9 @@ optScaleFun <- function(
   )
 }
 plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
-                    method = 'bootstrap') {
+                    method = 'bootstrap', plot = FALSE) {
+
+  # Control plots, but mostly to generate ZMS validation stats
 
   par(mfrow = c(1,2))
   plot(uEtrain, Etrain); grid()
@@ -247,129 +248,95 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
   par(mfrow = c(1,1))
 
 
-  if(TRUE) {
-    #"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-    # Consistency plots ####
-    set.seed(123) # for bootstrap reprod
-    resC0 = ErrViewLib::plotLZMS(
-      uEtrain, Etrain/uEtrain,
-      aux = 1:length(Etrain),
-      logX = TRUE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "uE",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Training set, fv = ',signif(resC0$fVal,2)))
+  set.seed(123) # for bootstrap reprod
+  resC0 = ErrViewLib::plotLZMS(
+    uEtrain, Etrain/uEtrain,
+    aux = 1:length(Etrain),
+    logX = TRUE,
+    ylim = c(0,2),
+    nBin = nBin,
+    plot = plot,
+    popMin = 20,
+    score = TRUE,
+    xlab = "uE",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Training set, fv = ',signif(resC0$fVal,2)))
 
-    set.seed(123)
-    resC1 = ErrViewLib::plotLZMS(
-      uEtrains, Etrain/uEtrains,
-      aux = 1:length(Etrain),
-      logX = TRUE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "uE scaled",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Scaled training set, fv = ',signif(resC1$fVal,2)))
+  set.seed(123)
+  resC1 = ErrViewLib::plotLZMS(
+    uEtrains, Etrain/uEtrains,
+    aux = 1:length(Etrain),
+    logX = TRUE,
+    ylim = c(0,2),
+    nBin = nBin,
+    plot = plot,
+    popMin = 20,
+    score = TRUE,
+    xlab = "uE scaled",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Scaled training set, fv = ',signif(resC1$fVal,2)))
 
-    # ErrViewLib::plotCC(Etrain,uEtrain)
-    # ErrViewLib::plotCC(Etrain,uEtrains, add = TRUE, col=2)
+  set.seed(123)
+  resX10 = ErrViewLib::plotLZMS(
+    X1train, Etrain/uEtrain,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    popMin = 20,
+    plot = plot,
+    score = TRUE,
+    xlab = "X1",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Training set, fv = ',signif(resX10$fVal,2)))
+  set.seed(123)
+  resX11 =ErrViewLib::plotLZMS(
+    X1train, Etrain/uEtrains,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    popMin = 20,
+    plot = plot,
+    score = TRUE,
+    xlab = "X1",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Scaled training set, fv = ',signif(resX11$fVal,2)))
+  set.seed(123)
+  resX20 = ErrViewLib::plotLZMS(
+    X2train, Etrain/uEtrain,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    popMin = 20,
+    plot = plot,
+    score = TRUE,
+    xlab = "X2",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Training set, fv = ',signif(resX20$fVal,2)))
+  set.seed(123)
+  resX21 =ErrViewLib::plotLZMS(
+    X2train, Etrain/uEtrains,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    popMin = 20,
+    plot = plot,
+    score = TRUE,
+    xlab = "X2",
+    method = method,
+    title = ''
+  )
+  title(main = paste0('Scaled training set, fv = ',signif(resX21$fVal,2)))
 
-    # res = ErrViewLib::plotLZMS(
-    #   uEtest, Etest/uEtest,
-    #   logX = TRUE,
-    #   ylim = c(0,2),
-    #   nBin = nBin,
-    #   score = TRUE,
-    #   xlab = "uE",
-    #   method = 'stud',
-    #   title = ''
-    # )
-    # title(main = paste0('Test set, fv = ',signif(res$fVal,2)))
-    #
-    # res =ErrViewLib::plotLZMS(
-    #   uEtests, Etest/uEtests,
-    #   logX = TRUE,
-    #   ylim = c(0,2),
-    #   nBin = nBin,
-    #   score = TRUE,
-    #   xlab = "uE scaled",
-    #   method = 'stud',
-    #   title = ''
-    # )
-    # title(main = paste0('Scaled test set, fv = ',signif(res$fVal,2)))
-
-    # ErrViewLib::plotCC(Etest,uEtest)
-    # ErrViewLib::plotCC(Etest,uEtests, add = TRUE, col=2)
-
-  }
-
-  if(TRUE) {
-    #"""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""""
-    # Adaptivity plots ####
-    set.seed(123)
-    resX10 = ErrViewLib::plotLZMS(
-      X1train, Etrain/uEtrain,
-      logX = FALSE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "X1",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Training set, fv = ',signif(resX10$fVal,2)))
-    set.seed(123)
-    resX11 =ErrViewLib::plotLZMS(
-      X1train, Etrain/uEtrains,
-      logX = FALSE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "X1",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Scaled training set, fv = ',signif(resX11$fVal,2)))
-    set.seed(123)
-    resX20 = ErrViewLib::plotLZMS(
-      X2train, Etrain/uEtrain,
-      logX = FALSE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "X2",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Training set, fv = ',signif(resX20$fVal,2)))
-    set.seed(123)
-    resX21 =ErrViewLib::plotLZMS(
-      X2train, Etrain/uEtrains,
-      logX = FALSE,
-      ylim = c(0,2),
-      nBin = nBin,
-      popMin = 20,
-      score = TRUE,
-      xlab = "X2",
-      method = method,
-      title = ''
-    )
-    title(main = paste0('Scaled training set, fv = ',signif(resX21$fVal,2)))
-
-
-  }
   return(
     list(
       fvC0    = signif(resC0$fVal,2),
@@ -550,8 +517,7 @@ Et  = Rt - Ct
 Mt = length(Et)
 uEt = uCt
 
-
-# uE ####
+# uE binning ####
 
 io = order(uE)
 uEtrain = uE[io]
@@ -575,14 +541,13 @@ nBinStat = 100
 intrvStat = ErrViewLib::genIntervals(M, nBinStat)
 models = c("2000","1111","1100","1011")
 
-for(nBinOpt in c(20,40,80)[3]) {
+for(nBinOpt in c(20,40,80)) {
   scaleMod = 'bin-wise'
   intrvOpt  = ErrViewLib::genIntervals(uEtrain, nBinOpt,
                                        equiPop = TRUE,
                                        logBin = TRUE)
   nBinOpt = intrvOpt$nbr
 
-  ## Train ####
   tabRes = tabBVS = list()
   for(scoreComp in models) {
     res = calibrate(
@@ -598,7 +563,6 @@ for(nBinOpt in c(20,40,80)[3]) {
                      io0, io1, io2))
   }
 
-  # Rescale test uncertainties using limits of training set
   for(scoreComp in models) {
     s = tabBVS[[scoreComp]]
     lwlims  = uEtrain[intrvOpt$lwindx][-1]
@@ -620,7 +584,7 @@ for(nBinOpt in c(20,40,80)[3]) {
   sink()
 }
 
-# X1 ####
+# X1 binning ####
 io = order(X1,uE)
 uEtrain = uE[io]
 Etrain  = E[io]
@@ -630,7 +594,16 @@ io0 = order(uEtrain)
 io1 = order(X1train)
 io2 = order(X2train,uEtrain)
 
-for(nBinOpt in c(20,40,80)[3]) {
+io = order(X1t,uEt)
+uEtest = uEt[io]
+Etest  = Et[io]
+X1test = X1t[io]
+X2test = X2t[io]
+io0t = order(uEtest)
+io1t = order(X1test)
+io2t = order(X2test,uEtest)
+
+for(nBinOpt in c(20,40,80)) {
   scaleMod = 'bin-wise'
   intrvOpt  = ErrViewLib::genIntervals(uEtrain, nBinOpt,
                                        equiPop = TRUE,
@@ -639,7 +612,6 @@ for(nBinOpt in c(20,40,80)[3]) {
 
   models2 =  c("2000","1111","1100","1011")
 
-  ## Train ####
   tabRes2 = tabBVS2 = list()
   for(scoreComp in models2) {
     res = calibrate(
@@ -654,16 +626,6 @@ for(nBinOpt in c(20,40,80)[3]) {
                      nBinStat, intrvStat,
                      io0, io1, io2))
   }
-
-  ## Test ####
-  io = order(X1t,uEt)
-  uEtest = uEt[io]
-  Etest  = Et[io]
-  X1test = X1t[io]
-  X2test = X2t[io]
-  io0t = order(uEtest)
-  io1t = order(X1test)
-  io2t = order(X2test,uEtest)
 
   # Rescale test uncertainties using X1train and uEtrain limits
   io = order(X1,uE)
@@ -770,15 +732,18 @@ resp$glob  = sum(gs[1:4])
 resp$nll   = gs[5]
 resp$ence  = gs[6]
 resp$uce   = gs[7]
-tabResIso = resp
+
+tabResIso = list()
+tabResIso[['2000']] = tabRes[['2000']]
+tabResIso[['iso']]  = resp
 
 sink(file =  file.path(tabDir,paste0('tabResIso.tex')))
 tab = showTabRes(tabResIso, Etrain, uEtrain, nBinStat, intrvStat, io0, io1, io2)
 print(knitr::kable(tab, 'latex'))
 sink()
 
-# Figures ####
-## Fig 1 ####
+
+# Fig 1 ####
 png(
   file = file.path(figDir, 'Fig_01a.png'),
   width  = gPars$reso,
@@ -874,7 +839,7 @@ for (j in seq_along(nBins)) {
   co[j, 14:16] = c(res$fVal, res$lofVal, res$upfVal)
 }
 
-## Fig 2 ####
+# Fig 2 ####
 
 png(
   file = file.path(figDir, paste0('Fig_02.png')),
@@ -1079,8 +1044,6 @@ intrvOptX  = ErrViewLib::genIntervals(
   equiPop = TRUE,
   logBin  = FALSE)
 nBinOptX = intrvOptX$nbr
-
-
 
 # Training
 savg = sqrt(mean((Etrain/uEtrain)^2))
