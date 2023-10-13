@@ -75,67 +75,104 @@ scoreFun1 <- function(E, uE, nBin, intrv) {
   }
   return(
     list(
-      ence = mean(abs(sqrt(MV)-sqrt(MSE))/sqrt(MV)),
-      uce  = mean(abs(MV-MSE))
+      ence = mean(abs(sqrt(MV) - sqrt(MSE)) / sqrt(MV)),
+      uce  = mean(abs(MV - MSE))
     )
   )
 }
-nll = function(E, uE) {
-  0.5*mean( E^2/uE^2 + log(uE^2) + 1.837877 )
+nllFun = function(E, uE) {
+  calib = 0.5*mean( E^2/uE^2  )
+  sharp = 0.5*mean( log(uE^2) )
+  nll   = calib + sharp + 0.5 * 1.837877
+  return(
+    list(
+      calib = calib,
+      sharp = sharp,
+      nll   = nll
+    )
+  )
 }
 scoreFun = function(
   pars,
-  E, uE,
+  E, uE, X1, X2,
   nBinOpt, intrvOpt, nBinStat, intrvStat,
-  io0, io1, io2,
   scoreComp ='1111',
   scaleMod = c('bin-wise','element-wise','linear')) {
 
   scaleMod = match.arg(scaleMod)
 
   # Apply scaling model to uE
-  uE   = fScale(pars, uE, scaleMod, nBinOpt, intrvOpt)
-
+  uEs = fScale(pars, uE, scaleMod, nBinOpt, intrvOpt)
+  Z   = E /uEs
+  
   score = 0
 
-  # Mean calibration error
+  # Mean calibration error or NLL
   if (substr(scoreComp, 1, 1) == "1")
-    score = score + abs(log(mean((E / uE) ^ 2)))
+    score = score + abs(log(mean(Z ^ 2)))
   else if (substr(scoreComp, 1, 1) == "2")
-    score = score + nll(E, uE)
+    score = score + nllFun(E, uEs)$nll
 
   # Mean consistency error
-  if (substr(scoreComp, 2, 2) == "1")
-    score = score + scoreFun0(E[io0] / uE[io0], nBinStat, intrvStat)
+  if (substr(scoreComp, 2, 2) == "1") {
+    io = order(uEs)
+    score = score + scoreFun0(Z[io], nBinStat, intrvStat)
+  }
 
   # Mean adaptivity error
   ## X1
-  if (substr(scoreComp, 3, 3) == "1")
-    score = score + scoreFun0(E[io1] / uE[io1], nBinStat, intrvStat)
+  if (substr(scoreComp, 3, 3) == "1") {
+    io = order(X1, uEs)
+    score = score + scoreFun0(Z[io], nBinStat, intrvStat)
+  }
   ## X2
-  if (substr(scoreComp, 4, 4) == "1")
-    score = score + scoreFun0(E[io2] / uE[io2], nBinStat, intrvStat)
+  if (substr(scoreComp, 4, 4) == "1") {
+    io = order(X2, uEs)
+    score = score + scoreFun0(Z[io], nBinStat, intrvStat)
+  }
 
   return(score)
 }
-globScore <- function(E, uE, nBin, intrv, io0, io1, io2) {
+globScore <- function(E, uE, X1, X2, nBin, intrv) {
+  
+  M = length(uE)
+  io0 = order(uE)
+  io1 = order(X1,1:M)
+  io2 = order(X2,1:M)
+  
   Z = E / uE
-  cal   = abs(log(mean(Z^2)))
-  cons  = scoreFun0(Z[io0], nBin, intrv)
-  adap1 = scoreFun0(Z[io1], nBin, intrv)
-  adap2 = scoreFun0(Z[io2], nBin, intrv)
+  Scal  = abs(log(mean(Z^2)))
+  Scon  = scoreFun0(Z[io0], nBin, intrv)
+  SX1   = scoreFun0(Z[io1], nBin, intrv)
+  SX2   = scoreFun0(Z[io2], nBin, intrv)
+  Stot  = Scal + Scon + SX1 + SX2
   li    = scoreFun1(E[io0],uE[io0], nBin, intrv)
   ence  = li$ence
   uce   = li$uce
+  nl    = nllFun(E,uE)
+  nll   = nl$nll
+  calib = nl$calib
+  sharp = nl$sharp
+  
   return(
-    c(cal, cons, adap1, adap2, nll(E,uE), ence, uce)
+    list(
+      Scal  = Scal, 
+      Scon  = Scon, 
+      SX1   = SX1, 
+      SX2   = SX2,
+      Stot  = Stot,
+      ence  = ence, 
+      uce   = uce, 
+      nll   = nll, 
+      calib = calib, 
+      sharp = sharp
+    )
   )
 }
 optScaleFun <- function(
-  Etrain, uEtrain,
+  Etrain, uEtrain, X1train, X2train,
   scaleMod, scoreComp, scoreFun,
-  nBinOpt, intrvOpt, nBinStat, intrvStat,
-  io0, io1, io2
+  nBinOpt, intrvOpt, nBinStat, intrvStat
 ) {
 
   if(scaleMod == 'bin-wise') {
@@ -148,9 +185,9 @@ optScaleFun <- function(
     ub = 10.0 * s0
     algorithm = "NLOPT_GN_DIRECT" #"NLOPT_LN_BOBYQA"
     maxeval = 1e5
-    start = scoreFun(s0, Etrain, uEtrain,
+    start = scoreFun(s0, Etrain, uEtrain, X1train, X2train,
                      nBinOpt, intrvOpt, nBinStat, intrvStat,
-                     io0, io1, io2, scoreComp, scaleMod)
+                     scoreComp, scaleMod)
 
   } else if(scaleMod == 'element-wise') {
     # c = sqrt(mean((Etrain/uEtrain)^2))
@@ -184,10 +221,9 @@ optScaleFun <- function(
       maxeval     = maxeval),
     lb = lb,
     ub = ub,
-    E = Etrain, uE = uEtrain,
+    E = Etrain, uE = uEtrain, X1 = X2train, X2 = X2train,
     nBinOpt = nBinOpt, intrvOpt = intrvOpt,
     nBinStat = nBinStat, intrvStat = intrvStat,
-    io0 = io0, io1 = io1, io2 = io2,
     scoreComp = scoreComp, scaleMod = scaleMod)
   cat('Status : ', resOpt$status, ', Objective =',resOpt$objective,'\n\n')
   s1 = resOpt$solution
@@ -209,10 +245,9 @@ optScaleFun <- function(
         maxeval     = maxeval/5),
       lb = lb,
       ub = ub,
-      E = Etrain, uE = uEtrain,
+      E = Etrain, uE = uEtrain, X1 = X2train, X2 = X2train,
       nBinOpt = nBinOpt, intrvOpt = intrvOpt,
       nBinStat = nBinStat, intrvStat = intrvStat,
-      io0 = io0, io1 = io1, io2 = io2,
       scoreComp = scoreComp, scaleMod = scaleMod)
     status = resOpt$status
     nbEval = nbEval + maxeval / 5
@@ -232,22 +267,22 @@ optScaleFun <- function(
   )
 }
 plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
-                    method = 'bootstrap', plot = FALSE) {
+                    method = 'stud', plot = FALSE) {
 
   # Control plots, but mostly to generate ZMS validation stats
-
-  par(mfrow = c(1,2))
-  plot(uEtrain, Etrain); grid()
-  abline(a=0, b=-2, lty=2, col=2)
-  abline(a=0, b=2, lty=2, col=2)
-  box()
-  plot(uEtrains, Etrain); grid()
-  abline(a=0, b=-2, lty=2, col=2)
-  abline(a=0, b=2, lty=2, col=2)
-  box()
-  par(mfrow = c(1,1))
-
-
+  if(plot) {
+    par(mfrow = c(1,2))
+    plot(uEtrain, Etrain); grid()
+    abline(a=0, b=-2, lty=2, col=2)
+    abline(a=0, b=2, lty=2, col=2)
+    box()
+    plot(uEtrains, Etrain); grid()
+    abline(a=0, b=-2, lty=2, col=2)
+    abline(a=0, b=2, lty=2, col=2)
+    box()
+    par(mfrow = c(1,1))
+  }
+  
   set.seed(123) # for bootstrap reprod
   resC0 = ErrViewLib::plotLZMS(
     uEtrain, Etrain/uEtrain,
@@ -262,7 +297,8 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Training set, fv = ',signif(resC0$fVal,2)))
+  if(plot)
+    title(main = paste0('Training set, fv = ',signif(resC0$fVal,2)))
 
   set.seed(123)
   resC1 = ErrViewLib::plotLZMS(
@@ -278,11 +314,13 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Scaled training set, fv = ',signif(resC1$fVal,2)))
+  if(plot)
+    title(main = paste0('Scaled training set, fv = ',signif(resC1$fVal,2)))
 
   set.seed(123)
   resX10 = ErrViewLib::plotLZMS(
     X1train, Etrain/uEtrain,
+    aux = uEtrain,
     logX = FALSE,
     ylim = c(0,2),
     nBin = nBin,
@@ -293,10 +331,13 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Training set, fv = ',signif(resX10$fVal,2)))
+  if(plot)
+    title(main = paste0('Training set, fv = ',signif(resX10$fVal,2)))
+  
   set.seed(123)
   resX11 =ErrViewLib::plotLZMS(
     X1train, Etrain/uEtrains,
+    aux = uEtrain,
     logX = FALSE,
     ylim = c(0,2),
     nBin = nBin,
@@ -307,10 +348,13 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Scaled training set, fv = ',signif(resX11$fVal,2)))
+  if(plot)
+    title(main = paste0('Scaled training set, fv = ',signif(resX11$fVal,2)))
+
   set.seed(123)
   resX20 = ErrViewLib::plotLZMS(
     X2train, Etrain/uEtrain,
+    aux = uEtrain,
     logX = FALSE,
     ylim = c(0,2),
     nBin = nBin,
@@ -321,10 +365,13 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Training set, fv = ',signif(resX20$fVal,2)))
+  if(plot)
+    title(main = paste0('Training set, fv = ',signif(resX20$fVal,2)))
+  
   set.seed(123)
   resX21 =ErrViewLib::plotLZMS(
     X2train, Etrain/uEtrains,
+    aux = uEtrain,
     logX = FALSE,
     ylim = c(0,2),
     nBin = nBin,
@@ -335,7 +382,8 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     method = method,
     title = ''
   )
-  title(main = paste0('Scaled training set, fv = ',signif(resX21$fVal,2)))
+  if(plot)
+    title(main = paste0('Scaled training set, fv = ',signif(resX21$fVal,2)))
 
   return(
     list(
@@ -360,55 +408,114 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     )
   )
 }
+fvScores <- function(E, u, X1, X2, nBin, method = 'stud', plot = FALSE) {
+  
+  Z = E / u
+  M = length(Z)
+
+  set.seed(123) # for bootstrap reprod
+  resU = ErrViewLib::plotLZMS(
+    u, Z,
+    aux = 1:M,
+    logX = TRUE,
+    ylim = c(0,2),
+    nBin = nBin,
+    plot = plot,
+    score = TRUE,
+    xlab = "uE",
+    method = method,
+    title = ''
+  )
+  if(plot)
+    title(main = paste0(
+      'Training set, fv = ',signif(resU$fVal,2),
+      ' [',round(resU$lofVal,2),', ',round(resU$upfVal,2),']')
+    )
+  
+  set.seed(123)
+  resX1 = ErrViewLib::plotLZMS(
+    X1, Z,
+    aux = 1:M,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    plot = plot,
+    score = TRUE,
+    xlab = "X1",
+    method = method,
+    title = ''
+  )
+  if(plot)
+    title(main = paste0(
+      'Training set, fv = ',signif(resX1$fVal,2),
+      ' [',round(resX1$lofVal,2),', ',round(resX1$upfVal,2),']')
+    )
+  
+  set.seed(123)
+  resX2 = ErrViewLib::plotLZMS(
+    X2, Z,
+    aux = 1:M,
+    logX = FALSE,
+    ylim = c(0,2),
+    nBin = nBin,
+    plot = plot,
+    score = TRUE,
+    xlab = "X2",
+    method = method,
+    title = ''
+  )
+  if(plot)
+    title(main = paste0(
+      'Training set, fv = ',signif(resX2$fVal,2),
+      ' [',round(resX2$lofVal,2),', ',round(resX2$upfVal,2),']')
+    )
+  
+  return(
+    list(
+      fvu    = signif(resU$fVal,2),
+      lofvu  = signif(resU$lofVal,2),
+      upfvu  = signif(resU$upfVal,2),
+      fvX1   = signif(resX1$fVal,2),
+      lofvX1 = signif(resX1$lofVal,2),
+      upfvX1 = signif(resX1$upfVal,2),
+      fvX2   = signif(resX2$fVal,2),
+      lofvX2 = signif(resX2$lofVal,2),
+      upfvX2 = signif(resX2$upfVal,2)
+    )
+  )
+}
 calibrate <- function(
   Etrain, uEtrain, X1train, X2train,
   nBinOpt, intrvOpt, nBinStat, intrvStat,
-  io0, io1, io2,
-  scaleMod, scoreComp, scoreFun, tabRes, tabBVS) {
+  scaleMod, scoreComp, scoreFun, fv_method) {
 
   res = optScaleFun(
-    Etrain, uEtrain,
+    Etrain, uEtrain, X1train, X2train,
     scaleMod, scoreComp, scoreFun,
-    nBinOpt, intrvOpt, nBinStat, intrvStat,
-    io0, io1, io2
+    nBinOpt, intrvOpt, nBinStat, intrvStat
   )
 
-  start = scoreFun(res$s0, Etrain, uEtrain,
+  start = scoreFun(res$s0, Etrain, uEtrain, X1train, X2train, 
                    nBinOpt, intrvOpt, nBinStat, intrvStat,
-                   io0, io1, io2, scoreComp, scaleMod)
-  end0  = scoreFun(res$s , Etrain, uEtrain,
+                   scoreComp, scaleMod)
+  end0  = scoreFun(res$s , Etrain, uEtrain, X1train, X2train, 
                    nBinOpt, intrvOpt, nBinStat, intrvStat,
-                   io0, io1, io2, scoreComp, scaleMod)
+                   scoreComp, scaleMod)
   print(c(start, end0, res$end))
-  plot(res$s0/res$s); abline(h=1,lty=2,col=2)
-  tabBVS[[scoreComp]] = res$s
 
   # Rescale train uncertainties using bins
   uEtrains = fScale(res$s, uEtrain, scaleMod, nBinOpt, intrvOpt)
-  plot(uEtrain, uEtrains, log = 'xy', col = 4)
-  abline(a=0,b=1, lty = 2)
-  grid(equilogs = FALSE)
 
-  # Final sub-scores
-  abs(log(mean((Etrain/uEtrains)^2)))
-  scoreFun0(Etrain/uEtrains, nBinStat, intrvStat)
-  scoreFun0(Etrain[io1]/uEtrains[io1], nBinStat, intrvStat)
-  scoreFun0(Etrain[io2]/uEtrains[io2], nBinStat, intrvStat)
-
-  resp = plotRes(Etrain, uEtrain, uEtrains, X1train, X2train, nBinStat)
-  gs   = globScore(Etrain, uEtrains, nBinStat, intrvStat, io0, io1, io2)
-  resp$cal   = gs[1]
-  resp$cons  = gs[2]
-  resp$adap1 = gs[3]
-  resp$adap2 = gs[4]
-  resp$glob  = sum(gs[1:4])
-  resp$nll   = gs[5]
-  tabRes[[scoreComp]] = resp
-
+  # Final scores
+  
+  gs   = globScore(Etrain, uEtrains,  X1train, X2train, nBinStat, intrvStat)
+  fs   = fvScores(Etrain, uEtrains, X1train, X2train, nBinStat, method = 'bootstrap')
+  scores = formatScores(gs, fs)
+  
   return(
     list(
-      tabRes = tabRes,
-      tabBVS = tabBVS
+      scores = scores,
+      s = res$s
       )
   )
 
@@ -417,41 +524,56 @@ showTabRes <- function(tabRes, Etrain, uEtrain, nBin, intrv, io0, io1, io2) {
   gs0 = globScore(Etrain, uEtrain, nBin, intrv, io0, io1, io2)
   df = data.frame(
     model = '0000',
-    nll   = signif(gs0[5],3),
-    cal   = signif(gs0[1],2),
-    cons  = signif(gs0[2],2),
-    adap1 = signif(gs0[3],2),
-    adap2 = signif(gs0[4],2),
-    glob  = signif(sum(gs0[1:4]),2),
+    NLL   = signif(gs0$nll,3),
+    Scal  = signif(gs0$Scal,2),
+    Scon  = signif(gs0$Scon,2),
+    SX1   = signif(gs0$SX1,2),
+    SX2   = signif(gs0$SX2,2),
+    Stot  = signif(gs0$Stot,2),
     fvuE  = paste0('[',round(tabRes[[1]]$lofvC0,2),', ',
                    round(tabRes[[1]]$upfvC0,2),']'),
     fvX1  = paste0('[',round(tabRes[[1]]$lofvX10,2),', ',
                    round(tabRes[[1]]$upfvX10,2),']'),
     fvX2  = paste0('[',round(tabRes[[1]]$lofvX20,2),', ',
                    round(tabRes[[1]]$upfvX20,2),']')
-
+    
   )
   for(comp in names(tabRes)) {
     df1 = data.frame(
       model = comp,
-
-      nll   = signif(tabRes[[comp]]$nll,3),
-      cal   = signif(tabRes[[comp]]$cal,2),
-      cons  = signif(tabRes[[comp]]$cons,2),
-      adap1 = signif(tabRes[[comp]]$adap1,2),
-      adap2 = signif(tabRes[[comp]]$adap2,2),
-      glob  = signif(tabRes[[comp]]$glob,2),
+      NLL   = signif(tabRes[[comp]]$nll,3),
+      Scal  = signif(tabRes[[comp]]$Scal,2),
+      Scon  = signif(tabRes[[comp]]$Scon,2),
+      SX1   = signif(tabRes[[comp]]$SX1,2),
+      SX2   = signif(tabRes[[comp]]$SX2,2),
+      Stot  = signif(tabRes[[comp]]$Stot,2),
       fvuE  = paste0('[',round(tabRes[[comp]]$lofvC1,2),', ',
                      round(tabRes[[comp]]$upfvC1,2),']'),
       fvX1  = paste0('[',round(tabRes[[comp]]$lofvX11,2),', ',
                      round(tabRes[[comp]]$upfvX11,2),']'),
       fvX2  = paste0('[',round(tabRes[[comp]]$lofvX21,2),', ',
                      round(tabRes[[comp]]$upfvX21,2),']')
-
+      
     )
     df = rbind(df,df1)
   }
   df
+}
+formatScores <- function(gs,fs) {
+  return(
+    list(
+      NLL  = round(gs$nll,2),
+      Scal = round(gs$Scal,2),
+      Scon = round(gs$Scon,2),
+      SX1  = round(gs$SX1,2),
+      SX2  = round(gs$SX2,2),
+      Stot = round(gs$Stot,2),
+      ENCE = round(gs$ence,2),
+      fvu  = paste0('[',round(fs$lofvu,2), ', ',round(fs$upfvu,2),']'),
+      fvu  = paste0('[',round(fs$lofvX1,2),', ',round(fs$upfvX1,2),']'),
+      fvu  = paste0('[',round(fs$lofvX2,2),', ',round(fs$upfvX2,2),']')
+    )
+  )  
 }
 fSel <- function(i, X, lwlims) {
   if(i == 1)
@@ -517,187 +639,8 @@ Et  = Rt - Ct
 Mt = length(Et)
 uEt = uCt
 
-# uE binning ####
-
-io = order(uE)
-uEtrain = uE[io]
-Etrain  = E[io]
-X1train = X1[io]
-X2train = X2[io]
-io0 = order(uEtrain)
-io1 = order(X1train,uEtrain)
-io2 = order(X2train,uEtrain)
-
-io = order(uEt)
-uEtest = uEt[io]
-Etest  = Et[io]
-X1test = X1t[io]
-X2test = X2t[io]
-io0t = order(uEtest)
-io1t = order(X1test,uEtest)
-io2t = order(X2test,uEtest)
-
-nBinStat = 100
-intrvStat = ErrViewLib::genIntervals(M, nBinStat)
-models = c("2000","1111","1100","1011")
-
-for(nBinOpt in c(20,40,80)) {
-  scaleMod = 'bin-wise'
-  intrvOpt  = ErrViewLib::genIntervals(uEtrain, nBinOpt,
-                                       equiPop = TRUE,
-                                       logBin = TRUE)
-  nBinOpt = intrvOpt$nbr
-
-  tabRes = tabBVS = list()
-  for(scoreComp in models) {
-    res = calibrate(
-      Etrain, uEtrain, X1train, X2train,
-      nBinOpt, intrvOpt, nBinStat, intrvStat,
-      io0, io1, io2,
-      scaleMod, scoreComp, scoreFun,
-      tabRes, tabBVS)
-    tabRes = res$tabRes
-    tabBVS = res$tabBVS
-    print(showTabRes(tabRes, Etrain, uEtrain,
-                     nBinStat, intrvStat,
-                     io0, io1, io2))
-  }
-
-  for(scoreComp in models) {
-    s = tabBVS[[scoreComp]]
-    lwlims  = uEtrain[intrvOpt$lwindx][-1]
-    uEtests = scaleByLimits(uEtest, uEtest, s, lwlims)
-    resp = plotRes(Etest, uEtest, uEtests, X1test, X2test, nBinStat)
-    gs   = globScore(Etest, uEtests, nBinStat, intrvStat, io0t, io1t, io2t)
-    resp$cal   = gs[1]
-    resp$cons  = gs[2]
-    resp$adap1 = gs[3]
-    resp$adap2 = gs[4]
-    resp$glob  = sum(gs[1:4])
-    resp$nll   = gs[5]
-    tabRes[[paste0('test_',scoreComp)]] = resp
-  }
-
-  sink(file =  file.path(tabDir,paste0('tabRes_',nBinOpt,'.tex')))
-  tab = showTabRes(tabRes, Etrain, uEtrain, nBinStat, intrvStat, io0, io1, io2)
-  print(knitr::kable(tab, 'latex'))
-  sink()
-}
-
-# X1 binning ####
-io = order(X1,uE)
-uEtrain = uE[io]
-Etrain  = E[io]
-X1train = X1[io]
-X2train = X2[io]
-io0 = order(uEtrain)
-io1 = order(X1train)
-io2 = order(X2train,uEtrain)
-
-io = order(X1t,uEt)
-uEtest = uEt[io]
-Etest  = Et[io]
-X1test = X1t[io]
-X2test = X2t[io]
-io0t = order(uEtest)
-io1t = order(X1test)
-io2t = order(X2test,uEtest)
-
-for(nBinOpt in c(20,40,80)) {
-  scaleMod = 'bin-wise'
-  intrvOpt  = ErrViewLib::genIntervals(uEtrain, nBinOpt,
-                                       equiPop = TRUE,
-                                       logBin = FALSE)
-  nBinOpt = intrvOpt$nbr
-
-  models2 =  c("2000","1111","1100","1011")
-
-  tabRes2 = tabBVS2 = list()
-  for(scoreComp in models2) {
-    res = calibrate(
-      Etrain, uEtrain, X1train, X2train,
-      nBinOpt, intrvOpt, nBinStat, intrvStat,
-      io0, io1, io2,
-      scaleMod, scoreComp, scoreFun,
-      tabRes2, tabBVS2)
-    tabRes2 = res$tabRes
-    tabBVS2 = res$tabBVS
-    print(showTabRes(tabRes2, Etrain, uEtrain,
-                     nBinStat, intrvStat,
-                     io0, io1, io2))
-  }
-
-  # Rescale test uncertainties using X1train and uEtrain limits
-  io = order(X1,uE)
-  X1train = X1[io]
-  uEtrain = uE[io]
-  for(scoreComp in models2) {
-    s = tabBVS2[[scoreComp]]
-    lwlims1 = X1train[intrvOpt$lwindx][-1]
-    lwlims2 = uEtrain[intrvOpt$lwindx][-1]
-    uEtests = uEtest
-    for(i in 1:nBinOpt) {
-      if(i == 1)
-        xmin = -Inf
-      else
-        xmin = lwlims1[i-1]
-
-      if(i == nBinOpt)
-        xmax  = Inf
-      else
-        xmax = lwlims1[i]
-
-      if(xmin < xmax) {
-        sel = X1test >= xmin & X1test < xmax
-
-      } else { # degeneracy due to stratification: use secondary variable
-        sel = X1test == xmin
-
-        if (sum(lwlims1 == xmin) > 2) {
-
-          indxs = which(lwlims1 == xmin)
-
-          if(i == indxs[1])
-            xmin2 = -Inf
-          else
-            xmin2 = lwlims2[i-1]
-
-          if(i == indxs[length(indxs)])
-            xmax2  = Inf
-          else
-            xmax2 = lwlims2[i]
-
-          sel = sel & uEtest >= xmin2 & uEtest < xmax2
-
-        }
-      }
-      if(sum(sel) > 0)
-        uEtests[sel] = uEtest[sel] * s[i]
-
-    }
-
-    resp = plotRes(Etest, uEtest, uEtests, X1test, X2test, nBinStat)
-    gs   = globScore(Etest, uEtests, nBinStat, intrvStat, io0t, io1t, io2t)
-    resp$cal   = gs[1]
-    resp$cons  = gs[2]
-    resp$adap1 = gs[3]
-    resp$adap2 = gs[4]
-    resp$glob  = sum(gs[1:4])
-    resp$nll   = gs[5]
-    tabRes2[[paste0('test_',scoreComp)]] = resp
-  }
-
-  sink(file =  file.path(tabDir,paste0('tabRes2_',nBinOpt,'.tex')))
-  tab = showTabRes(tabRes2, Etrain, uEtrain, nBinStat, intrvStat, io0, io1, io2)
-  print(knitr::kable(tab, 'latex'))
-  sink()
-}
-
-
-# Isotonic reg. ####
-
 D = read.table(
-  '../Data/BUS2022/Busk2022_QM9_E.csv', #'qm9_U0_test_Orig.csv',
+  '../Data/BUS2022/qm9_qm9_E_calibrated_isotonic_test.csv',
   sep = ',',
   header = TRUE,
   check.names = FALSE,
@@ -707,41 +650,231 @@ D = read.table(
 Si  = D[, "formula"]
 X1i = CHNOSZ::mass(Si)
 X2i = fractHetero(Si)
-Ri  = D[, "E"]
+Ri  = D[, "E_"]
 Ci  = D[, "prediction"]
 uCi = D[, "uncertainty_total"] ^ 0.5
-Ei = Ri - Ci
+Ei  = Ri - Ci
 uEi = uCi
 
-io = order(uEi)
+# Scoring bins
+nBinStat = 100
+intrvStat = ErrViewLib::genIntervals(M, nBinStat)
+
+fv_method = 'bootstrap'
+# fv_method = 'stud'
+
+scaleMod= 'bin-wise'
+
+nMC = 1000
+
+# uE binning ####
+
+io = order(uE)
+uEtrain = uE[io]
+Etrain  = E[io]
+X1train = X1[io]
+X2train = X2[io]
+
+io = order(uEt)
+uEtest = uEt[io]
+Etest  = Et[io]
+X1test = X1t[io]
+X2test = X2t[io]
+
+io    = order(uEi)
 uEiso = uEi[io]
 Eiso  = Ei[io]
 X1iso = X1i[io]
 X2iso = X2i[io]
-io0i = order(uEiso)
-io1i = order(X1iso,uEiso)
-io2i = order(X2iso,uEiso)
 
-resp = plotRes(Eiso, uEiso, uEiso, X1iso, X2iso, nBinStat)
-gs   = globScore(Eiso, uEiso, nBinStat, intrvStat, io0i, io1i, io2i)
-resp$cal   = gs[1]
-resp$cons  = gs[2]
-resp$adap1 = gs[3]
-resp$adap2 = gs[4]
-resp$glob  = sum(gs[1:4])
-resp$nll   = gs[5]
-resp$ence  = gs[6]
-resp$uce   = gs[7]
+## Reference values ####
+tabResAux = list()
+gs = globScore(Etrain, uEtrain, X1train, X2train, nBinStat, intrvStat)
+fs = fvScores(Etrain, uEtrain, X1train, X2train, nBinStat, method = fv_method)
+tabResAux[['train_0000']] = formatScores(gs, fs)
 
-tabResIso = list()
-tabResIso[['2000']] = tabRes[['2000']]
-tabResIso[['iso']]  = resp
+gs = globScore(Etest, uEtest, X1test, X2test, nBinStat, intrvStat)
+fs = fvScores(Etest, uEtest, X1test, X2test, nBinStat, method = fv_method)
+tabResAux[['test_0000']] = formatScores(gs, fs)
 
-sink(file =  file.path(tabDir,paste0('tabResIso.tex')))
-tab = showTabRes(tabResIso, Etrain, uEtrain, nBinStat, intrvStat, io0, io1, io2)
-print(knitr::kable(tab, 'latex'))
-sink()
+gs = globScore(Eiso, uEiso, X1iso, X2iso, nBinStat, intrvStat)
+fs = fvScores(Eiso, uEiso, X1iso, X2iso, nBinStat, method = fv_method)
+tabResAux[['iso_0000']] = formatScores(gs, fs)
 
+tabSim = list()
+for (i in 1:nMC) {
+  Esim = rnorm(uEtrain, 0, uEtrain)
+  gs = globScore(Esim, uEtrain, X1train, X2train, nBinStat, intrvStat)
+  tabSim[[i]]  = gs
+}
+tab = as.data.frame(do.call(rbind, tabSim))
+gs = as.list(apply(tab,2,function(x) mean(unlist(x))))
+fs = fvScores(Esim, uEtrain, X1train, X2train, nBinStat, method = 'stud')
+tabResAux[['train_simul_0000']] = formatScores(gs, fs)
+
+tabSim = list()
+for (i in 1:nMC) {
+  Esim = rnorm(uEtest,0,uEtest)
+  gs = globScore(Esim, uEtest, X1test, X2test, nBinStat, intrvStat)
+  tabSim[[i]]  = gs
+}
+tab = as.data.frame(do.call(rbind, tabSim))
+gs = as.list(apply(tab,2,function(x) mean(unlist(x))))
+fs = fvScores(Esim, uEtest, X1test, X2test, nBinStat, method = 'stud')
+tabResAux[['test_simul_0000']] = formatScores(gs, fs)
+
+tab = as.matrix(as.data.frame(do.call(rbind, tabResAux)))
+knitr::kable(tab)
+
+models  = c("2000","1111","1100","1011")
+
+for(nBinOpt in c(20,40,80)) {
+  intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
+  # nBinOpt  = intrvOpt$nbr # to use when equiPop = FALSE
+
+  tabRes = tabResAux 
+  tabBVS = list()
+  for(scoreComp in models) {
+    
+    # Optimize scaling factors
+    res = calibrate(
+      Etrain, uEtrain, X1train, X2train,
+      nBinOpt, intrvOpt, nBinStat, intrvStat,
+      scaleMod, scoreComp, scoreFun, fv_method)
+    tabRes[[paste0('train_',scoreComp)]] = res$scores
+    tabBVS[[scoreComp]] = res$s
+    
+    tab = as.matrix(as.data.frame(do.call(rbind, tabRes)))
+    knitr::kable(tab)
+  } # Separate loops to order results table rows
+  
+  for(scoreComp in models) {
+    # Scale test set using training set intervals limits
+    s = tabBVS[[scoreComp]]
+    lwlims  = uEtrain[intrvOpt$lwindx][-1]
+    uEtests = scaleByLimits(uEtest, uEtest, s, lwlims)
+    
+    # Score scaled test set
+    gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
+    fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+    tabRes[[paste0('test_',scoreComp)]] = formatScores(gs, fs)
+  
+    tab = as.matrix(as.data.frame(do.call(rbind, tabRes)))
+    knitr::kable(tab)
+  }
+
+  sink(file =  file.path(tabDir,paste0('tabRes_',nBinOpt,'.tex')))
+  tab = as.matrix(as.data.frame(do.call(rbind, tabRes)))
+  print(knitr::kable(tab, 'latex'))
+  sink()
+}
+
+save(tabRes,tabBVS,file=paste0(tabDir,'/tab_Res_BVS.Rda'))
+
+
+# X1 binning ####
+io = order(X1,uE)
+uEtrain = uE[io]
+Etrain  = E[io]
+X1train = X1[io]
+X2train = X2[io]
+
+io = order(X1t,uEt)
+uEtest = uEt[io]
+Etest  = Et[io]
+X1test = X1t[io]
+X2test = X2t[io]
+
+models2 =  c("2000","1111","1100","1011")
+
+for(nBinOpt in c(20,40,80)) {
+  scaleMod = 'bin-wise'
+  intrvOpt  = ErrViewLib::genIntervals(uEtrain, nBinOpt)
+  # nBinOpt = intrvOpt$nbr
+  
+  tabRes2 = tabResAux 
+  tabBVS2 = list()
+  for(scoreComp in models2) {
+    
+    # Optimize scaling factors
+    res = calibrate(
+      Etrain, uEtrain, X1train, X2train,
+      nBinOpt, intrvOpt, nBinStat, intrvStat,
+      scaleMod, scoreComp, scoreFun, fv_method)
+    tabRes2[[paste0('train_',scoreComp)]] = res$scores
+    tabBVS2[[scoreComp]] = res$s
+    
+    tab = as.matrix(as.data.frame(do.call(rbind, tabRes2)))
+    knitr::kable(tab)
+  } # Separate loops to order results table rows
+  
+  
+  # Rescale test uncertainties using X1train and uEtrain limits
+  io = order(X1,uE)
+  X1train = X1[io]
+  uEtrain = uE[io]
+  for(scoreComp in models2) {
+    
+    s = tabBVS2[[scoreComp]]
+    
+    lwlims1 = X1train[intrvOpt$lwindx][-1]
+    lwlims2 = uEtrain[intrvOpt$lwindx][-1]
+    uEtests = uEtest
+    for(i in 1:nBinOpt) {
+      if(i == 1)
+        xmin = -Inf
+      else
+        xmin = lwlims1[i-1]
+      
+      if(i == nBinOpt)
+        xmax  = Inf
+      else
+        xmax = lwlims1[i]
+      
+      if(xmin < xmax) {
+        sel = X1test >= xmin & X1test < xmax
+        
+      } else { # degeneracy due to stratification: use secondary variable
+        sel = X1test == xmin
+        
+        if (sum(lwlims1 == xmin) > 2) {
+          
+          indxs = which(lwlims1 == xmin)
+          
+          if(i == indxs[1])
+            xmin2 = -Inf
+          else
+            xmin2 = lwlims2[i-1]
+          
+          if(i == indxs[length(indxs)])
+            xmax2  = Inf
+          else
+            xmax2 = lwlims2[i]
+          
+          sel = sel & uEtest >= xmin2 & uEtest < xmax2
+          
+        }
+      }
+      if(sum(sel) > 0)
+        uEtests[sel] = uEtest[sel] * s[i]
+      
+    }
+    
+    gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
+    fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+    tabRes2[[paste0('test_',scoreComp)]] = formatScores(gs, fs)
+    
+    tab = as.matrix(as.data.frame(do.call(rbind, tabRes2)))
+    knitr::kable(tab)
+  }
+  
+  sink(file =  file.path(tabDir,paste0('tabRes2_',nBinOpt,'.tex')))
+  tab = as.matrix(as.data.frame(do.call(rbind, tabRes2)))
+  print(knitr::kable(tab, 'latex'))
+  sink()
+  
+}
+save(tabRes2,tabBVS2,file=paste0(tabDir,'/tab_Res2_BVS2.Rda'))
 
 # Fig 1 ####
 png(
@@ -791,53 +924,98 @@ ErrViewLib::plotLZMS(
 )
 dev.off()
 
+png(
+  file = file.path(figDir, 'Fig_01c.png'),
+  width  = gPars$reso,
+  height = gPars$reso
+)
+ErrViewLib::plotLZMS(
+  X1train, Etrain/uEtrain,
+  logX = FALSE,
+  xlab = 'X1, [Da]',
+  nBin = nBinStat,
+  score = FALSE,
+  label = 3,
+  title = 'LZMS analysis',
+  gPars = gPars
+)
+dev.off()
+
+png(
+  file = file.path(figDir, 'Fig_01d.png'),
+  width  = gPars$reso,
+  height = gPars$reso
+)
+ErrViewLib::plotLZMS(
+  X2train, Etrain/uEtrain,
+  logX = FALSE,
+  xlab = 'X2',
+  nBin = nBinStat,
+  score = FALSE,
+  label = 4,
+  title = 'LZMS analysis',
+  gPars = gPars
+)
+dev.off()
+
 # Optimal binning ####
+
+io = order(uE)
+uEtrain = uE[io]
+Etrain  = E[io]
+X1train = X1[io]
+X2train = X2[io]
+
+io = order(uEt)
+uEtest = uEt[io]
+Etest  = Et[io]
+X1test = X1t[io]
+X2test = X2t[io]
+
 nBins = c(2, 3, 4, 5, seq(6, 80, by = 2))
-co = matrix(NA, ncol = 16, nrow = length(nBins))
+co = matrix(NA, ncol = 19, nrow = length(nBins))
 nb = c()
-uEtrain = sort(uEtrain)
+# fv_method = 'stud'
+nMC    = 1000
+
 for (j in seq_along(nBins)) {
-  nBinOpt  = nBins[j]
+  nBinOpt  = nBins[j]; print(nBinOpt)
   intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
   lwlims   = uEtrain[intrvOpt$lwindx][-1]
   nb[j]    = intrvOpt$nbr
   s        = BVSfactors(uEtrain, Etrain / uEtrain, lwlims, nb[j])
   uEtests  = scaleByLimits(uEtest, uEtest, s, lwlims)
-  gs       = globScore(Etest, uEtests,
-                       nBinStat, intrvStat,
-                       io0t, io1t, io2t)
-  co[j, 1:7] = gs
-  set.seed(123)
-  res      = ErrViewLib::plotLZMS(
-    uEtests,
-    Etest / uEtests,
-    nBin = nBinStat,
-    score = TRUE,
-    method = 'bootstrap',
-    plot = FALSE
-  )
-  co[j, 8:10]  = c(res$fVal, res$lofVal, res$upfVal)
-  set.seed(123)
-  res      = ErrViewLib::plotLZMS(
-    X1test,
-    Etest / uEtests,
-    nBin = nBinStat,
-    score = TRUE,
-    method = 'bootstrap',
-    plot = FALSE
-  )
-  co[j, 11:13] = c(res$fVal, res$lofVal, res$upfVal)
-  set.seed(123)
-  res      = ErrViewLib::plotLZMS(
-    X2test,
-    Etest / uEtests,
-    nBin = nBinStat,
-    score = TRUE,
-    method = 'bootstrap',
-    plot = FALSE
-  )
-  co[j, 14:16] = c(res$fVal, res$lofVal, res$upfVal)
+  gs       = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
+  fs       = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+  co[j, 1:10] = unlist(gs)
+  co[j,11:19] = unlist(fs)
 }
+save(co, file = paste0(tabDir,'/tab_co.Rda'))
+
+## Simulated datasets ####
+nBins = c(2, 3, 4, 5, seq(6, 80, by = 2))
+cosim = matrix(NA, ncol = 10, nrow = length(nBins))
+nb = c()
+nMC = 10000
+for (j in seq_along(nBins)) {
+  nBinOpt  = nBins[j]; print(nBinOpt)
+  intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
+  lwlims   = uEtrain[intrvOpt$lwindx][-1]
+  nb[j]    = intrvOpt$nbr
+  s        = BVSfactors(uEtrain, Etrain / uEtrain, lwlims, nb[j])
+  uEtests  = scaleByLimits(uEtest, uEtest, s, lwlims)
+
+  tabSim = list()
+  for (i in 1:nMC) {
+    Esim = rnorm(uEtests,0,uEtests)
+    gs   = globScore(Esim, uEtests, X1test, X2test, nBinStat, intrvStat)
+    tabSim[[i]]  = gs
+  }
+  tab = as.data.frame(do.call(rbind, tabSim))
+  gs  = apply(tab,2,function(x) mean(unlist(x)))
+  cosim[j, ] = gs
+}
+save(cosim, file = paste0(tabDir,'/tab_cosim.Rda'))
 
 # Fig 2 ####
 
@@ -856,21 +1034,33 @@ par(
   cex.main = 1,
   lwd = gPars$lwd
 )
-plot(
+
+## Fig2a ####
+matplot( #NLL
   nb,
-  co[, 5],
+  co[, 8],
   type = 'p',
   pch = 19,
   xlab = 'Nb. of bins',
   ylab = 'Negative log likelihood',
   ylim = c(-3.08,-3.01),
   main = 'NLL',
-  col = gPars$cols[5]
+  col = gPars$cols[1]
 )
 grid()
-abline(h = tabResIso$nll,
+abline(h = tabResIso$iso$nll,
        lty = 2,lwd = 2* gPars$lwd,
-       col = gPars$cols[5])
+       col = gPars$cols[1])
+matlines(nb, cosim[,8], lty = 3, lwd =  3* gPars$lwd, col = gPars$cols[1])
+legend(
+  'topright',
+  bty    = 'n',
+  legend = c('Score', 'Isotonic', 'Simul'),
+  pch    = c(19, NA, NA),
+  lty    = c(0, 2, 3),
+  lwd    = c(0, 2, 3) * gPars$lwd,
+  col    = gPars$cols[c(1, 1, 1)]
+)
 box()
 label = 1
 mtext(
@@ -881,6 +1071,7 @@ mtext(
   line = 0.25
 )
 
+## Fig2b ####
 matplot(
   nb,
   cbind(co[, 6], 1e3*co[,7]),
@@ -894,20 +1085,27 @@ matplot(
   main = 'ENCE, UCE'
 )
 grid()
-abline(h = tabResIso$ence,
+abline(h = tabResIso$iso$ence,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-abline(h = tabResIso$uce*1e3,
+abline(h = tabResIso$iso$uce*1e3,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
+matlines(
+  nb,
+  cbind(cosim[, 6], 1e3*cosim[,7]),
+  type = 'l',
+  lty = 3, lwd = 3* gPars$lwd,
+  col = gPars$cols[1:2]
+)
 legend(
   'top',
-  bty = 'n',
-  ncol = 2,
-  legend = c('ENCE', 'UCE x 1000'),
-  pch = 19,
-  lty = 0,
-  col = gPars$cols[1:2]
+  bty    = 'n',
+  ncol   = 2,
+  legend = c('ENCE', 'UCE * 1000'),
+  pch    = 19,
+  lty    = 0,
+  col    = gPars$cols[1:2]
 )
 box()
 label = 2
@@ -919,44 +1117,56 @@ mtext(
   line = 0.25
 )
 
+## Fig2c ####
 matplot(
   nb,
-  co[, 1:4],
+  cbind(co[, 1:4],co[,5]/2),
   type = 'p',
   pch = 19,
-  col = gPars$cols[1:4],
+  col = gPars$cols[1:5],
   xlab = 'Nb. of bins',
   ylab = 'Calibration scores',
-  ylim = c(0, 0.45),
+  ylim = c(0, 0.6),
   yaxs = 'i',
   main = expression(S[x])
 )
 grid()
-abline(h = tabResIso$cal,
+abline(h = tabResIso$iso$Scal,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-abline(h = tabResIso$cons,
+abline(h = tabResIso$iso$Scon,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
-abline(h = tabResIso$adap1,
+abline(h = tabResIso$iso$SX1,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[3])
-abline(h = tabResIso$adap2,
+abline(h = tabResIso$iso$SX2,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[4])
+abline(h = tabResIso$iso$Stot/2,
+       lty = 2,lwd = 2* gPars$lwd,
+       col = gPars$cols[5])
+matlines(
+  nb,
+  cbind(cosim[, 1:4],cosim[,5]/2),
+  type = 'l',
+  lty = 3, lwd = 3* gPars$lwd,
+  col = gPars$cols[1:5]
+)
 legend(
-  'top',
+  'topright',
   bty = 'n',
-  ncol = 4,
+  ncol = 3,
   legend = c(
     expression(S[cal]),
     expression(S[u]),
     expression(S[X[1]]),
-    expression(S[X[2]])
+    expression(S[X[2]]),
+    expression(S[tot]/2)
   ),
   pch = 19,
   lty = 0,
-  col = gPars$cols[1:4]
+  col = gPars$cols[1:5]
 )
 box()
 label = 3
@@ -968,45 +1178,48 @@ mtext(
   line = 0.25
 )
 
+## Fig2d ####
 plot(
   nb,
-  co[, 8],
+  co[, 11],
   type = 'p',
   pch = 19,
   col = gPars$cols[2],
   xlab = 'Nb. of bins',
   ylab = 'Percentage of valid intervals',
-  ylim = c(0.5, 1),
+  ylim = c(0.5, 1.066),
   yaxs = 'i',
   main = expression(f[list(v, x)])
 )
 grid()
-segments(nb, co[, 9], nb, co[, 10], col = gPars$cols[2])
-abline(h = tabResIso$fvC1,
+segments(nb, co[, 12], nb, co[, 13], col = gPars$cols[2])
+abline(h = tabResIso$iso$fvC1,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
-polygon(c(-10,100,100,-10),
-        c(tabResIso$lofvC1,tabResIso$lofvC1,
-          tabResIso$upfvC1,tabResIso$upfvC1),
-        col = gPars$cols_tr[2], border = NA)
-points(nb,
-       co[, 11],
-       type = 'p',
-       pch = 19,
-       col = gPars$cols[3])
-segments(nb, co[, 12], nb, co[, 13], col = gPars$cols[3])
-abline(h = tabResIso$fvX11,
-       lty = 2,lwd = 2* gPars$lwd,
-       col = gPars$cols[3])
 points(nb,
        co[, 14],
        type = 'p',
        pch = 19,
+       col = gPars$cols[3])
+segments(nb, co[, 15], nb, co[, 16], col = gPars$cols[3])
+abline(h = tabResIso$iso$fvX11,
+       lty = 2,lwd = 2* gPars$lwd,
+       col = gPars$cols[3])
+points(nb,
+       co[, 17],
+       type = 'p',
+       pch = 19,
        col = gPars$cols[4])
-segments(nb, co[, 15], nb, co[, 16], col = gPars$cols[4])
-abline(h = tabResIso$fvX21,
+segments(nb, co[, 18], nb, co[, 19], col = gPars$cols[4])
+abline(h = tabResIso$iso$fvX21,
        lty = 2, lwd = 2* gPars$lwd,
        col = gPars$cols[4])
+abline(h = 0.95,
+       lty = 3,lwd = 3* gPars$lwd,
+       col = gPars$cols[4])
+polygon(c(-10,100,100,-10),
+        c(0.9,0.9,1.0,1.0),
+        col = gPars$cols_tr[4], border = NA)
 legend(
   'top',
   bty = 'n',
@@ -1034,19 +1247,13 @@ dev.off()
 tabRes2D = list()
 
 nBinOpt = 20
-intrvOptU  = ErrViewLib::genIntervals(
-  uEtrain, nBinOpt,
-  equiPop = TRUE,
-  logBin  = TRUE)
+intrvOptU  = ErrViewLib::genIntervals(uEtrain, nBinOpt)
 nBinOptu = intrvOptU$nbr
-intrvOptX  = ErrViewLib::genIntervals(
-  X1train, nBinOpt,
-  equiPop = TRUE,
-  logBin  = FALSE)
+intrvOptX  = ErrViewLib::genIntervals(X1train, nBinOpt)
 nBinOptX = intrvOptX$nbr
 
 # Training
-savg = sqrt(mean((Etrain/uEtrain)^2))
+savg    = sqrt(mean((Etrain/uEtrain)^2))
 lwlimsU = sort(uEtrain)[intrvOptU$lwindx][-1]
 lwlimsX = sort(X1train)[intrvOptX$lwindx][-1]
 s0 = matrix(NA,nrow = nBinOptu, ncol = nBinOptX)
@@ -1074,18 +1281,9 @@ for(i in 1:nBinOptu) {
   }
 }
 
-gs = globScore(Etrain, uEtrains, nBinStat, intrvStat, io0, io1, io2)
-resp = list()
-resp$cal   = gs[1]
-resp$cons  = gs[2]
-resp$adap1 = gs[3]
-resp$adap2 = gs[4]
-resp$glob  = sum(gs[1:4])
-resp$nll   = gs[5]
-resp$ence  = gs[6]
-resp$uce   = gs[7]
-tabRes2D[['train']] = resp
-
+gs   = globScore(Etrain, uEtrains, X1train, X2train, nBinStat, intrvStat)
+fs   = fvScores(Etrain, uEtrains, X1train, X2train, nBinStat, method = fv_method)
+tabRes2D[['train']] = formatScores(gs, fs)
 
 # Test
 uEtests = uEtest
@@ -1098,19 +1296,20 @@ for(i in 1:nBinOptu) {
       uEtests[sel] = uEtest[sel] * s0[i,j]
   }
 }
-
-gs = globScore(Etest, uEtests, nBinStat, intrvStat, io0t, io1t, io2t)
-resp = list()
-resp$cal   = gs[1]
-resp$cons  = gs[2]
-resp$adap1 = gs[3]
-resp$adap2 = gs[4]
-resp$glob  = sum(gs[1:4])
-resp$nll   = gs[5]
-resp$ence  = gs[6]
-resp$uce   = gs[7]
-tabRes2D[['test']] = resp
+gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
+fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+tabRes2D[['test']] = formatScores(gs, fs)
 
 sink(file =  file.path(tabDir,paste0('tabRes2D.tex')))
-print(knitr::kable(as.data.frame(do.call(rbind,tabRes2D)),'latex'))
+tab = as.matrix(as.data.frame(do.call(rbind, tabRes2D)))
+print(knitr::kable(tab, 'latex'))
 sink()
+
+# resp = plotRes(Etest, uEtest, uEtests, X1test, X2test, 
+#                nBinStat, method = 'stud', plot = TRUE)
+# fvScores(Etrain, uEtrain, X1train, X2train,
+#          nBinStat, method = 'bootstrap', plot=TRUE)
+# fvScores(Etrain, uEtrains, X1train, X2train,
+#          nBinStat, method = 'bootstrap', plot=TRUE)
+# fvScores(Etest, uEtests, X1test, X2test,
+#          nBinStat, method = 'bootstrap', plot=TRUE)
