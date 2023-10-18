@@ -520,45 +520,6 @@ calibrate <- function(
   )
 
 }
-showTabRes <- function(tabRes, Etrain, uEtrain, nBin, intrv, io0, io1, io2) {
-  gs0 = globScore(Etrain, uEtrain, nBin, intrv, io0, io1, io2)
-  df = data.frame(
-    model = '0000',
-    NLL   = signif(gs0$nll,3),
-    Scal  = signif(gs0$Scal,2),
-    Scon  = signif(gs0$Scon,2),
-    SX1   = signif(gs0$SX1,2),
-    SX2   = signif(gs0$SX2,2),
-    Stot  = signif(gs0$Stot,2),
-    fvuE  = paste0('[',round(tabRes[[1]]$lofvC0,2),', ',
-                   round(tabRes[[1]]$upfvC0,2),']'),
-    fvX1  = paste0('[',round(tabRes[[1]]$lofvX10,2),', ',
-                   round(tabRes[[1]]$upfvX10,2),']'),
-    fvX2  = paste0('[',round(tabRes[[1]]$lofvX20,2),', ',
-                   round(tabRes[[1]]$upfvX20,2),']')
-    
-  )
-  for(comp in names(tabRes)) {
-    df1 = data.frame(
-      model = comp,
-      NLL   = signif(tabRes[[comp]]$nll,3),
-      Scal  = signif(tabRes[[comp]]$Scal,2),
-      Scon  = signif(tabRes[[comp]]$Scon,2),
-      SX1   = signif(tabRes[[comp]]$SX1,2),
-      SX2   = signif(tabRes[[comp]]$SX2,2),
-      Stot  = signif(tabRes[[comp]]$Stot,2),
-      fvuE  = paste0('[',round(tabRes[[comp]]$lofvC1,2),', ',
-                     round(tabRes[[comp]]$upfvC1,2),']'),
-      fvX1  = paste0('[',round(tabRes[[comp]]$lofvX11,2),', ',
-                     round(tabRes[[comp]]$upfvX11,2),']'),
-      fvX2  = paste0('[',round(tabRes[[comp]]$lofvX21,2),', ',
-                     round(tabRes[[comp]]$upfvX21,2),']')
-      
-    )
-    df = rbind(df,df1)
-  }
-  df
-}
 formatScores <- function(gs,fs) {
   return(
     list(
@@ -569,9 +530,10 @@ formatScores <- function(gs,fs) {
       SX2  = round(gs$SX2,2),
       Stot = round(gs$Stot,2),
       ENCE = round(gs$ence,2),
+      UCE  = signif(gs$uce,2),
       fvu  = paste0('[',round(fs$lofvu,2), ', ',round(fs$upfvu,2),']'),
-      fvu  = paste0('[',round(fs$lofvX1,2),', ',round(fs$upfvX1,2),']'),
-      fvu  = paste0('[',round(fs$lofvX2,2),', ',round(fs$upfvX2,2),']')
+      fvX1 = paste0('[',round(fs$lofvX1,2),', ',round(fs$upfvX1,2),']'),
+      fvX2 = paste0('[',round(fs$lofvX2,2),', ',round(fs$upfvX2,2),']')
     )
   )  
 }
@@ -1018,6 +980,11 @@ for (j in seq_along(nBins)) {
 save(cosim, file = paste0(tabDir,'/tab_cosim.Rda'))
 
 # Fig 2 ####
+# 
+# load(file = paste0(tabDir,'/tab_Res_BVS.Rda'))
+# load(file = paste0(tabDir,'/tab_co.Rda'))
+# load(file = paste0(tabDir,'/tab_cosim.Rda'))
+# nb = nBins
 
 png(
   file = file.path(figDir, paste0('Fig_02.png')),
@@ -1048,7 +1015,7 @@ matplot( #NLL
   col = gPars$cols[1]
 )
 grid()
-abline(h = tabResIso$iso$nll,
+abline(h = tabRes$iso_0000$NLL,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
 matlines(nb, cosim[,8], lty = 3, lwd =  3* gPars$lwd, col = gPars$cols[1])
@@ -1085,10 +1052,10 @@ matplot(
   main = 'ENCE, UCE'
 )
 grid()
-abline(h = tabResIso$iso$ence,
+abline(h = tabRes$iso_0000$ENCE,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-abline(h = tabResIso$iso$uce*1e3,
+abline(h = tabRes$iso_0000$UCE*1e3,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
 matlines(
@@ -1131,19 +1098,19 @@ matplot(
   main = expression(S[x])
 )
 grid()
-abline(h = tabResIso$iso$Scal,
+abline(h = tabRes$iso_0000$Scal,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-abline(h = tabResIso$iso$Scon,
+abline(h = tabRes$iso_0000$Scon,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
-abline(h = tabResIso$iso$SX1,
+abline(h = tabRes$iso_0000$SX1,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[3])
-abline(h = tabResIso$iso$SX2,
+abline(h = tabRes$iso_0000$SX2,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[4])
-abline(h = tabResIso$iso$Stot/2,
+abline(h = tabRes$iso_0000$Stot/2,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[5])
 matlines(
@@ -1193,7 +1160,7 @@ plot(
 )
 grid()
 segments(nb, co[, 12], nb, co[, 13], col = gPars$cols[2])
-abline(h = tabResIso$iso$fvC1,
+abline(h = tabRes$iso_0000$fvu,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
 points(nb,
@@ -1202,7 +1169,7 @@ points(nb,
        pch = 19,
        col = gPars$cols[3])
 segments(nb, co[, 15], nb, co[, 16], col = gPars$cols[3])
-abline(h = tabResIso$iso$fvX11,
+abline(h = tabRes$iso_0000$fvX1,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[3])
 points(nb,
@@ -1211,15 +1178,15 @@ points(nb,
        pch = 19,
        col = gPars$cols[4])
 segments(nb, co[, 18], nb, co[, 19], col = gPars$cols[4])
-abline(h = tabResIso$iso$fvX21,
+abline(h = tabRes$iso_0000$fvX2,
        lty = 2, lwd = 2* gPars$lwd,
        col = gPars$cols[4])
 abline(h = 0.95,
        lty = 3,lwd = 3* gPars$lwd,
-       col = gPars$cols[4])
+       col = gPars$cols[1])
 polygon(c(-10,100,100,-10),
         c(0.9,0.9,1.0,1.0),
-        col = gPars$cols_tr[4], border = NA)
+        col = gPars$cols_tr[1], border = NA)
 legend(
   'top',
   bty = 'n',
