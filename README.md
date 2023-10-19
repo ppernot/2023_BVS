@@ -5,4 +5,8 @@
 
 # 2023_BVS
 
-Code and data to reproduce the results of "Can bin-wise scaling improve consistency and adaptivity of prediction uncertainty for machine learning regression ?" by P. Pernot.
+Code and data to reproduce the results of the paper 
+
+__Can bin-wise scaling improve consistency and adaptivity of prediction uncertainty for machine learning regression ?__ 
+
+P. Pernot (2023) _arXiv:2310.11978_ (https://doi.org/10.48550/arXiv.2310.11978)
