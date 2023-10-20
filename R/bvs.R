@@ -1,10 +1,8 @@
-
 figDir = '../Figs'
 tabDir = '../Tabs'
 library(ErrViewLib)
 library(CHNOSZ)
 gPars = ErrViewLib::setgPars(type = 'publish')
-scalePoints = 0.2
 
 fractHetero = function(S) {
   fHetero = c()
@@ -133,38 +131,52 @@ scoreFun = function(
 
   return(score)
 }
-globScore <- function(E, uE, X1, X2, nBin, intrv) {
+globScore <- function(E, u, X, nBin = 100) {
   
-  M = length(uE)
-  io0 = order(uE)
-  io1 = order(X1,1:M)
-  io2 = order(X2,1:M)
+  M = length(E)
   
-  Z = E / uE
+  Z = E / u
+  
+  intrv = ErrViewLib::genIntervals(u, nBin)
+  nBin = intrv$nbr
+  
+  # Global stats
   Scal  = abs(log(mean(Z^2)))
-  Scon  = scoreFun0(Z[io0], nBin, intrv)
-  SX1   = scoreFun0(Z[io1], nBin, intrv)
-  SX2   = scoreFun0(Z[io2], nBin, intrv)
-  Stot  = Scal + Scon + SX1 + SX2
-  li    = scoreFun1(E[io0],uE[io0], nBin, intrv)
-  ence  = li$ence
-  uce   = li$uce
-  nl    = nllFun(E,uE)
+  nl    = nllFun(E, u)
   nll   = nl$nll
   calib = nl$calib
   sharp = nl$sharp
   
+  # Local stats
+  iou   = order(u)
+  Su    = scoreFun0(Z[iou], nBin, intrv)
+  en    = scoreFun1(E[iou], u[iou], nBin, intrv)
+  enceu = en$ence
+  uceu  = en$uce
+  
+  SX = enceX = uceX = c()
+  for(i in 1:ncol(X)) {
+    ioXi     = order(X[,i])
+    SX[i]    = scoreFun0(Z[ioXi], nBin, intrv)
+    en       = scoreFun1(E[ioXi], u[ioXi], nBin, intrv)
+    enceX[i] = en$ence
+    uceX[i]  = en$uce
+  }
+  
+  Stot  = Scal + Su + sum(SX)
+  
   return(
     list(
-      Scal  = Scal, 
-      Scon  = Scon, 
-      SX1   = SX1, 
-      SX2   = SX2,
+      Scal  = Scal,
+      Su    = Su,
+      SX    = SX,
       Stot  = Stot,
-      ence  = ence, 
-      uce   = uce, 
-      nll   = nll, 
-      calib = calib, 
+      enceu = enceu,
+      enceX = enceX,
+      uceu  = uceu,
+      uceX  = uceX,
+      nll   = nll,
+      calib = calib,
       sharp = sharp
     )
   )
@@ -408,13 +420,13 @@ plotRes <- function(Etrain, uEtrain, uEtrains, X1train, X2train, nBin,
     )
   )
 }
-fvScores <- function(E, u, X1, X2, nBin, method = 'stud', plot = FALSE) {
+fvScores <- function(E, u, X, nBin, method = 'stud', plot = FALSE) {
   
   Z = E / u
   M = length(Z)
 
   set.seed(123) # for bootstrap reprod
-  resU = ErrViewLib::plotLZMS(
+  res = ErrViewLib::plotLZMS(
     u, Z,
     aux = 1:M,
     logX = TRUE,
@@ -426,61 +438,49 @@ fvScores <- function(E, u, X1, X2, nBin, method = 'stud', plot = FALSE) {
     method = method,
     title = ''
   )
+  fvu    = res$fVal
+  lofvu  = res$lofVal 
+  upfvu  = res$upfVal 
   if(plot)
     title(main = paste0(
-      'Training set, fv = ',signif(resU$fVal,2),
-      ' [',round(resU$lofVal,2),', ',round(resU$upfVal,2),']')
+      'fv = ',fvu,' [',round(lofvu,2),', ',round(upfvu,2),']')
     )
+  rm(res)
   
-  set.seed(123)
-  resX1 = ErrViewLib::plotLZMS(
-    X1, Z,
-    aux = 1:M,
-    logX = FALSE,
-    ylim = c(0,2),
-    nBin = nBin,
-    plot = plot,
-    score = TRUE,
-    xlab = "X1",
-    method = method,
-    title = ''
-  )
-  if(plot)
-    title(main = paste0(
-      'Training set, fv = ',signif(resX1$fVal,2),
-      ' [',round(resX1$lofVal,2),', ',round(resX1$upfVal,2),']')
+  fvX = lofvX = upfvX = c()
+  for(i in 1:ncol(X)) {
+    set.seed(123)
+    res = ErrViewLib::plotLZMS(
+      X[,i], Z,
+      aux = 1:M,
+      logX = FALSE,
+      ylim = c(0,2),
+      nBin = nBin,
+      plot = plot,
+      score = TRUE,
+      xlab = paste0("X",i),
+      method = method,
+      title = ''
     )
-  
-  set.seed(123)
-  resX2 = ErrViewLib::plotLZMS(
-    X2, Z,
-    aux = 1:M,
-    logX = FALSE,
-    ylim = c(0,2),
-    nBin = nBin,
-    plot = plot,
-    score = TRUE,
-    xlab = "X2",
-    method = method,
-    title = ''
-  )
-  if(plot)
-    title(main = paste0(
-      'Training set, fv = ',signif(resX2$fVal,2),
-      ' [',round(resX2$lofVal,2),', ',round(resX2$upfVal,2),']')
-    )
+    fvX[i]   = res$fVal  
+    lofvX[i] = res$lofVal
+    upfvX[i] = res$upfVal
+    if(plot)
+      title(main = paste0(
+        'fv = ',signif(fvX[i],2),
+        ' [',round(lofvX[i],2),', ',round(upfvX[i],2),']')
+      )
+    
+  }
   
   return(
     list(
-      fvu    = signif(resU$fVal,2),
-      lofvu  = signif(resU$lofVal,2),
-      upfvu  = signif(resU$upfVal,2),
-      fvX1   = signif(resX1$fVal,2),
-      lofvX1 = signif(resX1$lofVal,2),
-      upfvX1 = signif(resX1$upfVal,2),
-      fvX2   = signif(resX2$fVal,2),
-      lofvX2 = signif(resX2$lofVal,2),
-      upfvX2 = signif(resX2$upfVal,2)
+      fvu    = fvu,
+      lofvu  = lofvu,
+      upfvu  = upfvu,
+      fvX    = fvX,
+      lofvX  = lofvX,
+      upfvX  = upfvX
     )
   )
 }
@@ -507,9 +507,9 @@ calibrate <- function(
   uEtrains = fScale(res$s, uEtrain, scaleMod, nBinOpt, intrvOpt)
 
   # Final scores
-  
-  gs   = globScore(Etrain, uEtrains,  X1train, X2train, nBinStat, intrvStat)
-  fs   = fvScores(Etrain, uEtrains, X1train, X2train, nBinStat, method = 'bootstrap')
+  X  = cbind(X1train, X2train)
+  gs = globScore(Etrain, uEtrains, X, nBinStat)
+  fs = fvScores(Etrain, uEtrains, X, nBinStat, method = 'bootstrap')
   scores = formatScores(gs, fs)
   
   return(
@@ -523,17 +523,21 @@ calibrate <- function(
 formatScores <- function(gs,fs) {
   return(
     list(
-      NLL  = round(gs$nll,2),
-      Scal = round(gs$Scal,2),
-      Scon = round(gs$Scon,2),
-      SX1  = round(gs$SX1,2),
-      SX2  = round(gs$SX2,2),
-      Stot = round(gs$Stot,2),
-      ENCE = round(gs$ence,2),
-      UCE  = signif(gs$uce,2),
+      NLL    = round(gs$nll,2),
+      Scal   = round(gs$Scal,2),
+      Su     = round(gs$Su,2),
+      SX1    = round(gs$SX[1],2),
+      SX2    = round(gs$SX[2],2),
+      Stot   = round(gs$Stot,2),
+      ENCEu  = round(gs$enceu,2),
+      ENCEX1 = round(gs$enceX[1],2),
+      ENCEX2 = round(gs$enceX[2],2),
+      UCEu   = signif(gs$uceu,2),
+      UCEX1  = signif(gs$uceX[1],2),
+      UCEX2  = signif(gs$uceX[2],2),
       fvu  = paste0('[',round(fs$lofvu,2), ', ',round(fs$upfvu,2),']'),
-      fvX1 = paste0('[',round(fs$lofvX1,2),', ',round(fs$upfvX1,2),']'),
-      fvX2 = paste0('[',round(fs$lofvX2,2),', ',round(fs$upfvX2,2),']')
+      fvX1 = paste0('[',round(fs$lofvX[1],2),', ',round(fs$upfvX[1],2),']'),
+      fvX2 = paste0('[',round(fs$lofvX[2],2),', ',round(fs$upfvX[2],2),']')
     )
   )  
 }
@@ -618,9 +622,9 @@ uCi = D[, "uncertainty_total"] ^ 0.5
 Ei  = Ri - Ci
 uEi = uCi
 
-# Scoring bins
+# Scoring bins for training set
 nBinStat = 100
-intrvStat = ErrViewLib::genIntervals(M, nBinStat)
+intrvStat = ErrViewLib::genIntervals(uE, nBinStat)
 
 fv_method = 'bootstrap'
 # fv_method = 'stud'
@@ -651,38 +655,31 @@ X2iso = X2i[io]
 
 ## Reference values ####
 tabResAux = list()
-gs = globScore(Etrain, uEtrain, X1train, X2train, nBinStat, intrvStat)
-fs = fvScores(Etrain, uEtrain, X1train, X2train, nBinStat, method = fv_method)
+gs = globScore(Etrain, uEtrain, cbind(X1train, X2train), nBinStat)
+fs = fvScores(Etrain, uEtrain, cbind(X1train, X2train), nBinStat, 
+              method = fv_method)
 tabResAux[['train_0000']] = formatScores(gs, fs)
 
-gs = globScore(Etest, uEtest, X1test, X2test, nBinStat, intrvStat)
-fs = fvScores(Etest, uEtest, X1test, X2test, nBinStat, method = fv_method)
+gs = globScore(Etest, uEtest, cbind(X1test, X2test), nBinStat)
+fs = fvScores(Etest, uEtest, cbind(X1test, X2test), nBinStat, 
+              method = fv_method)
 tabResAux[['test_0000']] = formatScores(gs, fs)
 
-gs = globScore(Eiso, uEiso, X1iso, X2iso, nBinStat, intrvStat)
-fs = fvScores(Eiso, uEiso, X1iso, X2iso, nBinStat, method = fv_method)
+gs = globScore(Eiso, uEiso, cbind(X1iso, X2iso), nBinStat)
+fs = fvScores(Eiso, uEiso, cbind(X1iso, X2iso), nBinStat, 
+              method = fv_method)
 tabResAux[['iso_0000']] = formatScores(gs, fs)
 
-tabSim = list()
+tSim = matrix(NA, ncol = length(unlist(gs)), nrow = nMC)
+colnames(tSim) = names(unlist(gs))
 for (i in 1:nMC) {
-  Esim = rnorm(uEtrain, 0, uEtrain)
-  gs = globScore(Esim, uEtrain, X1train, X2train, nBinStat, intrvStat)
-  tabSim[[i]]  = gs
+  Esim = rnorm(uEtest, 0, uEtest)
+  gs = globScore(Esim, uEtest, cbind(X1test, X2test), nBinStat)
+  tSim[i,]  = unlist(gs)
 }
-tab = as.data.frame(do.call(rbind, tabSim))
-gs = as.list(apply(tab,2,function(x) mean(unlist(x))))
-fs = fvScores(Esim, uEtrain, X1train, X2train, nBinStat, method = 'stud')
-tabResAux[['train_simul_0000']] = formatScores(gs, fs)
-
-tabSim = list()
-for (i in 1:nMC) {
-  Esim = rnorm(uEtest,0,uEtest)
-  gs = globScore(Esim, uEtest, X1test, X2test, nBinStat, intrvStat)
-  tabSim[[i]]  = gs
-}
-tab = as.data.frame(do.call(rbind, tabSim))
-gs = as.list(apply(tab,2,function(x) mean(unlist(x))))
-fs = fvScores(Esim, uEtest, X1test, X2test, nBinStat, method = 'stud')
+gsm = apply(tSim, 2, mean, na.rm = TRUE)
+fs = fvScores(Esim, uEtest, cbind(X1test, X2test), nBinStat,
+              method = 'stud')
 tabResAux[['test_simul_0000']] = formatScores(gs, fs)
 
 tab = as.matrix(as.data.frame(do.call(rbind, tabResAux)))
@@ -692,7 +689,7 @@ models  = c("2000","1111","1100","1011")
 
 for(nBinOpt in c(20,40,80)) {
   intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
-  # nBinOpt  = intrvOpt$nbr # to use when equiPop = FALSE
+  nBinOpt  = intrvOpt$nbr
 
   tabRes = tabResAux 
   tabBVS = list()
@@ -717,8 +714,9 @@ for(nBinOpt in c(20,40,80)) {
     uEtests = scaleByLimits(uEtest, uEtest, s, lwlims)
     
     # Score scaled test set
-    gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
-    fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+    gs = globScore(Etest, uEtests, cbind(X1test, X2test), nBinStat)
+    fs = fvScores( Etest, uEtests, cbind(X1test, X2test), nBinStat, 
+                   method = fv_method)
     tabRes[[paste0('test_',scoreComp)]] = formatScores(gs, fs)
   
     tab = as.matrix(as.data.frame(do.call(rbind, tabRes)))
@@ -732,7 +730,6 @@ for(nBinOpt in c(20,40,80)) {
 }
 
 save(tabRes,tabBVS,file=paste0(tabDir,'/tab_Res_BVS.Rda'))
-
 
 # X1 binning ####
 io = order(X1,uE)
@@ -822,8 +819,9 @@ for(nBinOpt in c(20,40,80)) {
       
     }
     
-    gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
-    fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+    gs = globScore(Etest, uEtests, cbind(X1test, X2test), nBinStat)
+    fs = fvScores( Etest, uEtests, cbind(X1test, X2test), nBinStat, 
+                   method = fv_method)
     tabRes2[[paste0('test_',scoreComp)]] = formatScores(gs, fs)
     
     tab = as.matrix(as.data.frame(do.call(rbind, tabRes2)))
@@ -935,11 +933,8 @@ X1test = X1t[io]
 X2test = X2t[io]
 
 nBins = c(2, 3, 4, 5, seq(6, 80, by = 2))
-co = matrix(NA, ncol = 19, nrow = length(nBins))
+co = matrix(NA, ncol = 23, nrow = length(nBins))
 nb = c()
-# fv_method = 'stud'
-nMC    = 1000
-
 for (j in seq_along(nBins)) {
   nBinOpt  = nBins[j]; print(nBinOpt)
   intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
@@ -947,18 +942,18 @@ for (j in seq_along(nBins)) {
   nb[j]    = intrvOpt$nbr
   s        = BVSfactors(uEtrain, Etrain / uEtrain, lwlims, nb[j])
   uEtests  = scaleByLimits(uEtest, uEtest, s, lwlims)
-  gs       = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
-  fs       = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
-  co[j, 1:10] = unlist(gs)
-  co[j,11:19] = unlist(fs)
+  gs       = globScore(Etest, uEtests, cbind(X1test, X2test), nBinStat)
+  fs       = fvScores( Etest, uEtests, cbind(X1test, X2test), nBinStat, 
+                       method = fv_method)
+  co[j, 1:14] = unlist(gs)
+  co[j,15:23] = unlist(fs)
 }
 save(co, file = paste0(tabDir,'/tab_co.Rda'))
 
 ## Simulated datasets ####
 nBins = c(2, 3, 4, 5, seq(6, 80, by = 2))
-cosim = matrix(NA, ncol = 10, nrow = length(nBins))
+cosim = ucosim = matrix(NA, ncol = 14, nrow = length(nBins))
 nb = c()
-nMC = 10000
 for (j in seq_along(nBins)) {
   nBinOpt  = nBins[j]; print(nBinOpt)
   intrvOpt = ErrViewLib::genIntervals(uEtrain, nBinOpt)
@@ -967,17 +962,19 @@ for (j in seq_along(nBins)) {
   s        = BVSfactors(uEtrain, Etrain / uEtrain, lwlims, nb[j])
   uEtests  = scaleByLimits(uEtest, uEtest, s, lwlims)
 
-  tabSim = list()
+  tSim = matrix(NA, ncol = length(unlist(gs)), nrow = nMC)
+  colnames(tSim) = names(unlist(gs))
   for (i in 1:nMC) {
-    Esim = rnorm(uEtests,0,uEtests)
-    gs   = globScore(Esim, uEtests, X1test, X2test, nBinStat, intrvStat)
-    tabSim[[i]]  = gs
+    Esim     = rnorm(uEtests, 0, uEtests)
+    gs       = globScore(Esim, uEtests, cbind(X1test, X2test), nBinStat)
+    tSim[i,] = unlist(gs)
   }
-  tab = as.data.frame(do.call(rbind, tabSim))
-  gs  = apply(tab,2,function(x) mean(unlist(x)))
-  cosim[j, ] = gs
+  gsm = apply(tSim, 2, mean, na.rm = TRUE)
+  cosim[j, ]  = gsm
+  gsu = apply(tSim, 2, sd, na.rm = TRUE)
+  ucosim[j, ] = gsu
 }
-save(cosim, file = paste0(tabDir,'/tab_cosim.Rda'))
+save(cosim, ucosim, file = paste0(tabDir,'/tab_cosim.Rda'))
 
 # Fig 2 ####
 # 
@@ -1016,9 +1013,9 @@ matplot( #NLL
 )
 grid()
 abline(h = tabRes$iso_0000$NLL,
-       lty = 2,lwd = 2* gPars$lwd,
+       lty = 2, lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-matlines(nb, cosim[,8], lty = 3, lwd =  3* gPars$lwd, col = gPars$cols[1])
+matlines(nb, cosim[,8], lty = 3, lwd = 3* gPars$lwd, col = gPars$cols[1])
 legend(
   'topright',
   bty    = 'n',
@@ -1101,7 +1098,7 @@ grid()
 abline(h = tabRes$iso_0000$Scal,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[1])
-abline(h = tabRes$iso_0000$Scon,
+abline(h = tabRes$iso_0000$Su,
        lty = 2,lwd = 2* gPars$lwd,
        col = gPars$cols[2])
 abline(h = tabRes$iso_0000$SX1,
@@ -1248,8 +1245,9 @@ for(i in 1:nBinOptu) {
   }
 }
 
-gs   = globScore(Etrain, uEtrains, X1train, X2train, nBinStat, intrvStat)
-fs   = fvScores(Etrain, uEtrains, X1train, X2train, nBinStat, method = fv_method)
+gs = globScore(Etrain, uEtrains, cbind(X1train, X2train), nBinStat)
+fs = fvScores(Etrain, uEtrains, cbind(X1train, X2train), nBinStat, 
+              method = fv_method)
 tabRes2D[['train']] = formatScores(gs, fs)
 
 # Test
@@ -1263,20 +1261,12 @@ for(i in 1:nBinOptu) {
       uEtests[sel] = uEtest[sel] * s0[i,j]
   }
 }
-gs = globScore(Etest, uEtests, X1test, X2test, nBinStat, intrvStat)
-fs = fvScores( Etest, uEtests, X1test, X2test, nBinStat, method = fv_method)
+gs = globScore(Etest, uEtests, cbind(X1test, X2test), nBinStat)
+fs = fvScores( Etest, uEtests, cbind(X1test, X2test), nBinStat, 
+               method = fv_method)
 tabRes2D[['test']] = formatScores(gs, fs)
 
 sink(file =  file.path(tabDir,paste0('tabRes2D.tex')))
 tab = as.matrix(as.data.frame(do.call(rbind, tabRes2D)))
 print(knitr::kable(tab, 'latex'))
 sink()
-
-# resp = plotRes(Etest, uEtest, uEtests, X1test, X2test, 
-#                nBinStat, method = 'stud', plot = TRUE)
-# fvScores(Etrain, uEtrain, X1train, X2train,
-#          nBinStat, method = 'bootstrap', plot=TRUE)
-# fvScores(Etrain, uEtrains, X1train, X2train,
-#          nBinStat, method = 'bootstrap', plot=TRUE)
-# fvScores(Etest, uEtests, X1test, X2test,
-#          nBinStat, method = 'bootstrap', plot=TRUE)
